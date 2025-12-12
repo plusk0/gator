@@ -1,9 +1,12 @@
 package main
 
 import (
+	"bufio"
 	"database/sql"
+	"fmt"
 	"log"
 	"os"
+	"strings"
 
 	_ "github.com/lib/pq"
 	"github.com/plusk0/gator/internal/config"
@@ -11,8 +14,9 @@ import (
 )
 
 type state struct {
-	db  *database.Queries
-	cfg *config.Config
+	db            *database.Queries
+	currentOffset int
+	cfg           *config.Config
 }
 
 func main() {
@@ -31,6 +35,7 @@ func main() {
 		cfg: &cfg,
 	}
 	programState.db = dbQueries
+	programState.currentOffset = 0
 
 	cmds := commands{
 		registeredCommands: make(map[string]func(*state, command) error),
@@ -47,16 +52,35 @@ func main() {
 	cmds.register("following", middlewareLoggedIn(followingHandler))
 	cmds.register("unfollow", middlewareLoggedIn(unfollowHandler))
 	cmds.register("browse", middlewareLoggedIn(browseHandler))
+	cmds.register("next", middlewareLoggedIn(nextHandler))
 
-	if len(os.Args) < 2 {
-		log.Fatal("Usage: cli <command> [args...]")
-	}
+	cmds.register("exit", func(s *state, cmd command) error { os.Exit(0); return nil })
 
-	cmdName := os.Args[1]
-	cmdArgs := os.Args[2:]
+	// Start REPL
+	scanner := bufio.NewScanner(os.Stdin)
+	for {
+		fmt.Print("> ")
+		if !scanner.Scan() {
+			break // Exit on EOF (Ctrl+D)
+		}
+		input := scanner.Text()
+		if err := scanner.Err(); err != nil {
+			fmt.Fprintln(os.Stderr, "Error reading input:", err)
+			continue
+		}
 
-	err = cmds.run(programState, command{Name: cmdName, Args: cmdArgs})
-	if err != nil {
-		log.Fatal(err)
+		// Parse input into command and args
+		parts := strings.Fields(input)
+		if len(parts) == 0 {
+			continue
+		}
+		cmdName := parts[0]
+		cmdArgs := parts[1:]
+
+		// Run the command
+		err = cmds.run(programState, command{Name: cmdName, Args: cmdArgs})
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "Error:", err)
+		}
 	}
 }

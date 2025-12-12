@@ -93,8 +93,14 @@ func webScrape(s *state) error {
 		return nil // err
 	}
 	fmt.Println("Found data,...Logging")
+	x := 1
+
 	for _, v := range data.Channel.Item {
 		publishedAt := sql.NullTime{}
+		if x == 1 {
+			fmt.Println(v)
+			x = 2
+		}
 		if t, err := time.Parse(time.RFC1123Z, v.PubDate); err == nil {
 			publishedAt = sql.NullTime{
 				Time:  t,
@@ -119,6 +125,7 @@ func browseHandler(s *state, cmd command, user database.User) error {
 	if len(cmd.Args) > 1 {
 		return fmt.Errorf("usage: %s [MaxPostNumber]", cmd.Name)
 	}
+
 	num := 1
 	if len(cmd.Args) == 1 {
 		var err error
@@ -127,14 +134,50 @@ func browseHandler(s *state, cmd command, user database.User) error {
 			return fmt.Errorf("usage: %s [MaxPostNumber as int]", cmd.Name)
 		}
 	}
-	params := database.GetPostsForUserParams{user.ID, int32(num)}
+
+	offset := s.currentOffset
+	params := database.GetPostsForUserParams{
+		UserID: user.ID,
+		Limit:  int32(num),
+		Offset: int32(offset),
+	}
+
 	posts, err := s.db.GetPostsForUser(context.Background(), params)
 	if err != nil {
 		return err
 	}
+
+	for _, v := range posts {
+		fmt.Printf("\n %v fetched %v : %v \n %v \n", v.FeedName, v.UpdatedAt.Format("2006-01-02 15:04"), v.Title, v.Description.String)
+	}
+
+	// Update the offset for the next page
+	s.currentOffset += num
+	fmt.Println(s.currentOffset)
+	return nil
+}
+
+func nextHandler(s *state, cmd command, user database.User) error {
+	if s.currentOffset == 0 {
+		return fmt.Errorf("no previous browse command detected")
+	}
+
+	params := database.GetPostsForUserParams{
+		UserID: user.ID,
+		Limit:  int32(3),
+		Offset: int32(s.currentOffset),
+	}
+
+	posts, err := s.db.GetPostsForUser(context.Background(), params)
+	if err != nil {
+		return err
+	}
+
 	for _, v := range posts {
 		fmt.Println(v.Title, v.Description)
 	}
+
+	s.currentOffset += 3
 
 	return nil
 }
