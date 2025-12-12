@@ -7,6 +7,8 @@ import (
 	"log"
 	"os"
 	"strings"
+	"sync"
+	"time"
 
 	_ "github.com/lib/pq"
 	"github.com/plusk0/gator/internal/config"
@@ -14,9 +16,13 @@ import (
 )
 
 type state struct {
-	db            *database.Queries
+	db  *database.Queries
+	cfg *config.Config
+
 	currentOffset int
-	cfg           *config.Config
+	aggTicker     *time.Ticker
+	aggStopChan   chan struct{}
+	aggMutex      sync.Mutex
 }
 
 func main() {
@@ -36,6 +42,7 @@ func main() {
 	}
 	programState.db = dbQueries
 	programState.currentOffset = 0
+	programState.aggStopChan = make(chan struct{})
 
 	cmds := commands{
 		registeredCommands: make(map[string]func(*state, command) error),
@@ -56,10 +63,20 @@ func main() {
 
 	cmds.register("exit", func(s *state, cmd command) error { os.Exit(0); return nil })
 
+	defer func() {
+		programState.aggMutex.Lock()
+		if programState.aggTicker != nil {
+			programState.aggTicker.Stop()
+			close(programState.aggStopChan)
+		}
+		programState.aggMutex.Unlock()
+	}()
+
 	// Start REPL
+
 	scanner := bufio.NewScanner(os.Stdin)
 	for {
-		fmt.Print("> ")
+		fmt.Print("gator > ")
 		if !scanner.Scan() {
 			break // Exit on EOF (Ctrl+D)
 		}
@@ -68,8 +85,6 @@ func main() {
 			fmt.Fprintln(os.Stderr, "Error reading input:", err)
 			continue
 		}
-
-		// Parse input into command and args
 		parts := strings.Fields(input)
 		if len(parts) == 0 {
 			continue
@@ -77,7 +92,6 @@ func main() {
 		cmdName := parts[0]
 		cmdArgs := parts[1:]
 
-		// Run the command
 		err = cmds.run(programState, command{Name: cmdName, Args: cmdArgs})
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "Error:", err)

@@ -8,6 +8,7 @@ import (
 	"html"
 	"io"
 	"net/http"
+	"os"
 	"strconv"
 	"time"
 
@@ -33,20 +34,51 @@ type RSSItem struct {
 
 func aggHandler(s *state, cmd command) error {
 	if len(cmd.Args) != 1 {
-		return fmt.Errorf("usage: %s [timeInterval: 3h/2m/1s]", cmd.Name)
+		return fmt.Errorf("usage: %s [timeInterval: 3h/2m/1s|stop]", cmd.Name)
 	}
+
+	s.aggMutex.Lock()
+	defer s.aggMutex.Unlock()
+
+	if cmd.Args[0] == "stop" {
+		if s.aggTicker != nil {
+			s.aggTicker.Stop()
+			close(s.aggStopChan)
+			s.aggStopChan = make(chan struct{}) // Reset for future use
+			fmt.Println("Stopped feed collection.")
+		} else {
+			fmt.Println("No active feed collection to stop.")
+		}
+		return nil
+	}
+
 	timeBetweenRequests, err := time.ParseDuration(cmd.Args[0])
 	if err != nil {
 		return err
 	}
-	fmt.Println("Collecting feeds every ", timeBetweenRequests)
-	ticker := time.NewTicker(timeBetweenRequests)
-	for ; ; <-ticker.C {
-		err = webScrape(s)
-		if err != nil {
-			return err
-		}
+
+	if s.aggTicker != nil {
+		s.aggTicker.Stop()
+		close(s.aggStopChan)
+		s.aggStopChan = make(chan struct{}) // Reset for future use
 	}
+
+	s.aggTicker = time.NewTicker(timeBetweenRequests)
+	go func() {
+		for {
+			select {
+			case <-s.aggTicker.C:
+				if err := webScrape(s); err != nil {
+					fmt.Fprintln(os.Stderr, "Error in webScrape:", err)
+				}
+			case <-s.aggStopChan:
+				return // Exit the goroutine
+			}
+		}
+	}()
+
+	fmt.Printf("Collecting feeds every %v\n", timeBetweenRequests)
+	return nil
 }
 
 func fetchFeed(ctx context.Context, feedURL string) (*RSSFeed, error) {
@@ -92,15 +124,9 @@ func webScrape(s *state) error {
 	if err != nil {
 		return nil // err
 	}
-	fmt.Println("Found data,...Logging")
-	x := 1
-
 	for _, v := range data.Channel.Item {
 		publishedAt := sql.NullTime{}
-		if x == 1 {
-			fmt.Println(v)
-			x = 2
-		}
+
 		if t, err := time.Parse(time.RFC1123Z, v.PubDate); err == nil {
 			publishedAt = sql.NullTime{
 				Time:  t,
