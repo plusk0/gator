@@ -147,11 +147,8 @@ func browseHandler(s *state, cmd command, user database.User) error {
 		return err
 	}
 
-	for _, v := range posts {
-		fmt.Printf("\n %v fetched %v : %v \n %v \n", v.FeedName, v.UpdatedAt.Format("2006-01-02 15:04"), v.Title, v.Description.String)
-	}
+	visualizer(posts)
 
-	// Update the offset for the next page
 	s.currentOffset += num
 	fmt.Println(s.currentOffset)
 	return nil
@@ -172,12 +169,18 @@ func nextHandler(s *state, cmd command, user database.User) error {
 	if err != nil {
 		return err
 	}
-
-	for _, v := range posts {
-		fmt.Println(v.Title, v.Description)
-	}
-
-	s.currentOffset += 3
+	visualizer(posts)
+	s.currentOffset += 5
 
 	return nil
+}
+
+func visualizer(posts []database.GetPostsForUserRow) {
+	for _, v := range posts {
+		fmt.Printf("\n \033[34m %v \033[0m fetched \033[34m %v UTC \033[0m: %v \n %v \n",
+			v.FeedName,
+			v.UpdatedAt.Format("2006-01-02 15:04"),
+			v.Title,
+			v.Description.String)
+	}
 }
