@@ -48,7 +48,7 @@ sudo -u postgres psql
 
 Database Migrations with goose:
 cd sql/schema
-goose postgres "postgres://postgres:@localhost:5432/gator" up/down
+goose postgres "connection string" up/down
 
 sqlc for secure go/sql code generation
 sqlc generate (from project dir)
